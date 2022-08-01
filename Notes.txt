@@ -1,3 +1,0 @@
-# Never mix up I/O bound & CPU bound code in same method, because Python has different optimization
-# for these 2 type of operations.
-#
