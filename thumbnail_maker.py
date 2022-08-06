@@ -1,4 +1,5 @@
 import logging
+import multiprocessing
 import os.path
 import time
 from queue import Queue
@@ -19,18 +20,17 @@ class ThumbnailMakerService(object):
         self.home_dir = home_dir
         self.input_dir = self.home_dir + os.path.sep + 'incoming'
         self.output_dir = self.home_dir + os.path.sep + 'outgoing'
-        self.img_queue = Queue()
-        self.dl_queue = Queue()
+        self.img_queue = multiprocessing.JoinableQueue()
 
-    def download_image(self):
-        while not self.dl_queue.empty():
+    def download_image(self, dl_queue):
+        while not dl_queue.empty():
             try:
-                url = self.dl_queue.get(block=False)
+                url = dl_queue.get(block=False)
                 img_file_name = urlparse(url).path.split('/')[-1]
                 urlretrieve(url, self.input_dir + os.path.sep + img_file_name)
                 self.img_queue.put(img_file_name)
 
-                self.dl_queue.task_done()
+                dl_queue.task_done()
             except Queue.Empty:
                 logging.info("Queue empty")
 
@@ -92,20 +92,24 @@ class ThumbnailMakerService(object):
         logging.info("START make_thumbnails")
         start = time.perf_counter()
 
+        dl_queue = Queue()
+
         for img_url in img_url_list:
-            self.dl_queue.put(img_url)
+            dl_queue.put(img_url)
 
         num_dl_thread = 4
         for _ in range(num_dl_thread):
             t1 = Thread(target=self.download_image)
             t1.start()
 
-        t2 = Thread(target=self.perform_resizing)
-        t2.start()
+        num_processes = multiprocessing.cpu_count()
+        for _ in range(num_processes):
+            process = Thread(target=self.perform_resizing)
+            process.start()
 
-        self.dl_queue.join()
-        self.img_queue.put(None)
-        t2.join()
+        dl_queue.join()
+        for _ in range(num_processes):
+            self.img_queue.put(None)
 
         end = time.perf_counter()
         logging.info("END make_thumbnails in {} seconds".format(end - start))
